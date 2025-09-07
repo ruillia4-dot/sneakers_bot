@@ -3620,17 +3620,27 @@ class ShopBot:
         application.add_handler(admin_conv_handler)
         application.add_handler(contact_conv_handler)
 
-        PORT = int(os.environ.get('PORT', 8080))
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=self.token,
-            webhook_url=f"https://your-app-name.up.railway.app/{self.token}"
-        )
+        if os.getenv('RAILWAY_ENVIRONMENT') != 'production':
+            print("🤖 Бот запущено локально")
+            application.run_polling()
+        else:
+            # Для Railway
+            PORT = int(os.environ.get('PORT', 8080))
+            APP_NAME = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 
-        print("🤖 Бот запущено! Натисніть Ctrl+C для зупинки.")
-        application.run_polling()
+            if APP_NAME:
+                webhook_url = f"https://{APP_NAME}/{self.token}"
+                print(f"🚀 Бот запущено на Railway: {webhook_url}")
 
+                application.run_webhook(
+                    listen="0.0.0.0",
+                    port=PORT,
+                    url_path=self.token,
+                    webhook_url=webhook_url
+                )
+            else:
+                # Fallback для локального тестирования
+                application.run_polling()
 
 # ==================== ОСНОВНИЙ ФАЙЛ ДЛЯ ЗАПУСКУ ====================
 
