@@ -1010,39 +1010,32 @@ class ShopBot:
                     )
                 else:
                     # Несколько фото - медиагруппа
-                    try:
-                        media = []
-                        for j, photo in enumerate(photos):
-                            if j == 0:
-                                # Первое фото с полным описанием
-                                media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
-                            else:
-                                # Остальные фото без подписи
-                                media.append(InputMediaPhoto(media=photo))
+                    media = []
+                    for j, photo in enumerate(photos):
+                        if j == 0:
+                            # Первое фото с полным описанием
+                            media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
+                        else:
+                            # Остальные фото без подписи
+                            media.append(InputMediaPhoto(media=photo))
 
+                    try:
                         # Отправляем медиагруппу
                         await context.bot.send_media_group(
                             chat_id=update.effective_chat.id,
                             media=media
                         )
 
-                        # Отправляем кнопки отдельным сообщением после медиагруппы ТОЛЬКО если есть кнопки
-                        if len(keyboard) > 1:  # Если больше одной кнопки (есть навигация)
-                            await context.bot.send_message(
-                                chat_id=update.effective_chat.id,
-                                text=" ",  # Минимальный невидимый текст
-                                reply_markup=reply_markup
-                            )
-                        else:  # Если только кнопка связи - отправляем отдельно
-                            await context.bot.send_message(
-                                chat_id=update.effective_chat.id,
-                                text=" ",
-                                reply_markup=reply_markup
-                            )
+                        # Отправляем кнопки отдельным сообщением после медиагруппы
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=" ",
+                            reply_markup=reply_markup
+                        )
 
                     except Exception as e:
                         logger.error(f"Error sending media group for product {prod_id}: {e}")
-                        # Fallback - отправляем как обычное фото
+                        # Fallback - отправляем ТОЛЬКО первое фото
                         await context.bot.send_photo(
                             chat_id=update.effective_chat.id,
                             photo=photos[0],
@@ -1078,16 +1071,16 @@ class ShopBot:
             SELECT p.id, p.name, p.price, p.description, p.photos, c.name as cat_name, c.emoji as cat_emoji
             FROM products p
             JOIN categories c ON p.category_id = c.id
-            WHERE (c.id = %s OR c.parent_id = %s) AND p.is_available = TRUE 
+            WHERE c.id = %s AND p.is_available = TRUE 
             ORDER BY c.name, p.name
-        ''', (category_id, category_id))
+        ''', (category_id,))
         products = cursor.fetchall()
         conn.close()
 
         if not products:
             text = f"😔 У категорії \"{category_info['emoji']} {category_info['name']}\" поки що немає товарів"
             keyboard = [
-                [InlineKeyboardButton("🔙 До категорії", callback_data=f"category_{category_id}")],
+                [InlineKeyboardButton("🔙 До підкатегорії", callback_data=f"category_{category_id}")],
                 [InlineKeyboardButton("🏠 На головну", callback_data="start")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1106,7 +1099,7 @@ class ShopBot:
         )
 
         # Отправляем каждый товар
-        for row in products:
+        for i, row in enumerate(products):
             prod_id = row['id']
             name = row['name']
             price = row['price']
@@ -1128,9 +1121,18 @@ class ShopBot:
     📝 <b>Опис:</b>
     {description or 'Опис відсутній'}"""
 
-            keyboard = [
-                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
-            ]
+            # Определяем кнопки: для последнего товара добавляем навигацию
+            if i == len(products) - 1:  # Последний товар
+                keyboard = [
+                    [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")],
+                    [InlineKeyboardButton("🔙 До підкатегорії", callback_data=f"category_{category_id}")],
+                    [InlineKeyboardButton("🏠 На головну", callback_data="start")]
+                ]
+            else:  # Остальные товары
+                keyboard = [
+                    [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
+                ]
+
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             # Отправляем с фото или без
@@ -1146,31 +1148,32 @@ class ShopBot:
                     )
                 else:
                     # Несколько фото - медиагруппа
-                    try:
-                        media = []
-                        for i, photo in enumerate(photos):
-                            if i == 0:
-                                # Первое фото с полным описанием
-                                media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
-                            else:
-                                # Остальные фото без подписи
-                                media.append(InputMediaPhoto(media=photo))
+                    media = []
+                    for j, photo in enumerate(photos):
+                        if j == 0:
+                            # Первое фото с полным описанием
+                            media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
+                        else:
+                            # Остальные фото без подписи
+                            media.append(InputMediaPhoto(media=photo))
 
+                    try:
                         # Отправляем медиагруппу
                         await context.bot.send_media_group(
                             chat_id=update.effective_chat.id,
                             media=media
                         )
 
-                        # Отправляем кнопки отдельным сообщением
+                        # Отправляем кнопки отдельным сообщением после медиагруппы
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
                             text=" ",
                             reply_markup=reply_markup
                         )
+
                     except Exception as e:
                         logger.error(f"Error sending media group for product {prod_id}: {e}")
-                        # Fallback - отправляем как обычное фото
+                        # Fallback - отправляем ТОЛЬКО первое фото
                         await context.bot.send_photo(
                             chat_id=update.effective_chat.id,
                             photo=photos[0],
@@ -1186,18 +1189,6 @@ class ShopBot:
                     parse_mode='HTML',
                     reply_markup=reply_markup
                 )
-
-        # Отправляем кнопки навигации в конце
-        final_keyboard = [
-            [InlineKeyboardButton("🏠 На головну", callback_data="start")]
-        ]
-        final_reply_markup = InlineKeyboardMarkup(final_keyboard)
-
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=" ",
-            reply_markup=final_reply_markup
-        )
 
 
     async def show_all_products_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
