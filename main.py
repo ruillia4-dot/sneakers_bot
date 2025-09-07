@@ -494,6 +494,7 @@ class ShopBot:
             admin_message += f"🔗 <b>Лінк:</b> {preorder_data['link']}\n"
 
         admin_message += f"""
+   
         """
 
         # Отправляем админам
@@ -1043,7 +1044,11 @@ class ShopBot:
         ]
         final_reply_markup = InlineKeyboardMarkup(final_keyboard)
 
-
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="👆 Всі товари показані вище",
+            reply_markup=final_reply_markup
+        )
 
     async def show_all_products_in_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показ всех товаров в категории как отдельные посты со всеми фото"""
@@ -1148,7 +1153,12 @@ class ShopBot:
                             media=media
                         )
 
-
+                        # Отправляем кнопки отдельным сообщением
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="👆 Всі фотографії товару",
+                            reply_markup=reply_markup
+                        )
                     except Exception as e:
                         logger.error(f"Error sending media group for product {prod_id}: {e}")
                         # Fallback - отправляем как обычное фото
@@ -1174,6 +1184,11 @@ class ShopBot:
         ]
         final_reply_markup = InlineKeyboardMarkup(final_keyboard)
 
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="👆 Всі товари показані вище",
+            reply_markup=final_reply_markup
+        )
 
 
     async def show_all_products_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
