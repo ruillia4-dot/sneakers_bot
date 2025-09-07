@@ -914,159 +914,281 @@ class ShopBot:
 
         await self.show_product(update, context, show_category_header=True)
 
-    async def show_products_in_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показ товаров в категории"""
+    async def show_all_subcategories_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показ всех товаров из подкатегорий главной категории со всеми фото"""
         query = update.callback_query
         await query.answer()
 
-        category_id = int(query.data.split('_')[1])
+        parent_category_id = int(query.data.split('_')[2])
 
         conn = psycopg2.connect(**self.db_config)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Получение названия категории
-        cursor.execute('SELECT name, emoji, parent_id FROM categories WHERE id = %s', (category_id,))
-        category_info = cursor.fetchone()
+        # Получаем название главной категории
+        cursor.execute('SELECT name, emoji FROM categories WHERE id = %s', (parent_category_id,))
+        parent_category_info = cursor.fetchone()
 
-        # Проверяем есть ли подкатегории
-        cursor.execute('SELECT id, name, emoji FROM categories WHERE parent_id = %s ORDER BY name', (category_id,))
-        subcategories = cursor.fetchall()
-
-        if subcategories:
-            # Показываем подкатегории (это главная категория)
-            text = f"📂 <b>{category_info['emoji']} {category_info['name']}</b>\n\nОберіть підкатегорію:"
-            keyboard = []
-
-            for row in subcategories:
-                subcat_id = row['id']
-                name = row['name']
-                emoji = row['emoji']
-
-                # Подсчёт товаров в подкатегории
-                cursor.execute('SELECT COUNT(*) as count FROM products WHERE category_id = %s AND is_available = TRUE',
-                               (subcat_id,))
-                count = cursor.fetchone()['count']
-                button_text = f"{emoji} {name} ({count})"
-                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"category_{subcat_id}")])
-
-            # Также показываем товары из главной категории
-            cursor.execute('SELECT COUNT(*) as count FROM products WHERE category_id = %s AND is_available = TRUE',
-                           (category_id,))
-            main_count = cursor.fetchone()['count']
-            if main_count > 0:
-                keyboard.insert(0, [InlineKeyboardButton(f"📦 Загальні товари ({main_count})",
-                                                         callback_data=f"products_{category_id}")])
-
-            # Добавляем кнопку "Весь ассортимент" ТОЛЬКО для подкатегорий
-            cursor.execute('''
-                SELECT COUNT(*) as count FROM products p 
-                JOIN categories c ON p.category_id = c.id 
-                WHERE c.parent_id = %s AND p.is_available = TRUE
-            ''', (category_id,))
-            subcategories_products_count = cursor.fetchone()['count']
-
-            if subcategories_products_count > 0:
-                keyboard.append(
-                    [InlineKeyboardButton(f"🛍️ Весь асортимент ({subcategories_products_count})",
-                                          callback_data=f"all_subcategories_{category_id}")])
-
-            keyboard.append([InlineKeyboardButton("🔙 До категорій", callback_data="show_categories")])
-            keyboard.append([InlineKeyboardButton("🏠 На головну", callback_data="start")])
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            # Обработка ошибки "Message is not modified"
-            try:
-                await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
-            except Exception:
-                try:
-                    await query.delete_message()
-                except Exception:
-                    pass
-
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=text,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-
-            conn.close()
-            return
-
-        # Получение товаров (для подкатегорий или категорий без подкатегорий)
+        # Получаем все товары из подкатегорий
         cursor.execute('''
-            SELECT id, name, price, description, photos 
-            FROM products 
-            WHERE category_id = %s AND is_available = TRUE 
-            ORDER BY name
-        ''', (category_id,))
+            SELECT p.id, p.name, p.price, p.description, p.photos, c.name as cat_name, c.emoji as cat_emoji
+            FROM products p
+            JOIN categories c ON p.category_id = c.id
+            WHERE c.parent_id = %s AND p.is_available = TRUE 
+            ORDER BY c.name, p.name
+        ''', (parent_category_id,))
         products = cursor.fetchall()
-
-        # Проверяем количество товаров для кнопки "Весь асортимент"
-        product_count = len(products)
-
         conn.close()
 
         if not products:
-            text = f"😔 <b>У категорії \"{category_info['emoji']} {category_info['name']}\" поки що немає товарів</b>"
-            keyboard = []
-
-            # Если это подкатегория, добавляем возврат к родительской категории
-            if category_info['parent_id']:
-                keyboard.append([InlineKeyboardButton("🔙 До категорій",
-                                                      callback_data=f"category_{category_info['parent_id']}")])
-            keyboard.append([InlineKeyboardButton("🏠 На головну", callback_data="start")])
-
+            text = f"😔 У підкатегоріях \"{parent_category_info['emoji']} {parent_category_info['name']}\" поки що немає товарів"
+            keyboard = [
+                [InlineKeyboardButton("🔙 До категорії", callback_data=f"category_{parent_category_id}")],
+                [InlineKeyboardButton("🏠 На головну", callback_data="start")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
+            return
+
+        # Удаляем исходное сообщение
+        await query.delete_message()
+
+        # Отправляем заголовок
+        header_text = f"🛍️ <b>Весь асортимент підкатегорій: {parent_category_info['emoji']} {parent_category_info['name']}</b>\n\nЗнайдено {len(products)} товарів:"
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=header_text,
+            parse_mode='HTML'
+        )
+
+        # Отправляем каждый товар
+        for row in products:
+            prod_id = row['id']
+            name = row['name']
+            price = row['price']
+            description = row['description']
+            photos_json = row['photos']
+            cat_name = row['cat_name']
+            cat_emoji = row['cat_emoji']
 
             try:
-                await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
-            except Exception:
-                try:
-                    await query.delete_message()
-                except Exception:
-                    pass
+                photos = json.loads(photos_json) if photos_json else []
+            except:
+                photos = []
 
+            product_text = f"""🛍️ <b>{name}</b>
+
+    💰 <b>Ціна:</b> {price:.2f} грн
+    📂 <b>Підкатегорія:</b> {cat_emoji} {cat_name}
+
+    📝 <b>Опис:</b>
+    {description or 'Опис відсутній'}"""
+
+            keyboard = [
+                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            # Отправляем с фото или без
+            if photos:
+                if len(photos) == 1:
+                    # Одно фото
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=photos[0],
+                        caption=product_text,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                else:
+                    # Несколько фото - медиагруппа
+                    try:
+                        media = []
+                        for i, photo in enumerate(photos):
+                            if i == 0:
+                                # Первое фото с полным описанием
+                                media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
+                            else:
+                                # Остальные фото без подписи
+                                media.append(InputMediaPhoto(media=photo))
+
+                        # Отправляем медиагруппу
+                        await context.bot.send_media_group(
+                            chat_id=update.effective_chat.id,
+                            media=media
+                        )
+
+
+                    except Exception as e:
+                        logger.error(f"Error sending media group for product {prod_id}: {e}")
+                        # Fallback - отправляем как обычное фото
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=photos[0],
+                            caption=product_text,
+                            parse_mode='HTML',
+                            reply_markup=reply_markup
+                        )
+            else:
+                # Без фото
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text=text,
+                    text=product_text,
                     parse_mode='HTML',
                     reply_markup=reply_markup
                 )
+
+        # Отправляем кнопки навигации в конце
+        final_keyboard = [
+            [InlineKeyboardButton("🔙 До категорії", callback_data=f"category_{parent_category_id}")],
+            [InlineKeyboardButton("🏠 На головну", callback_data="start")]
+        ]
+        final_reply_markup = InlineKeyboardMarkup(final_keyboard)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="👆 Всі товари показані вище",
+            reply_markup=final_reply_markup
+        )
+
+    async def show_all_products_in_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показ всех товаров в категории как отдельные посты со всеми фото"""
+        query = update.callback_query
+        await query.answer()
+
+        category_id = int(query.data.split('_')[3])
+
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Получаем название категории
+        cursor.execute('SELECT name, emoji FROM categories WHERE id = %s', (category_id,))
+        category_info = cursor.fetchone()
+
+        # Получаем все товары
+        cursor.execute('''
+            SELECT p.id, p.name, p.price, p.description, p.photos, c.name as cat_name, c.emoji as cat_emoji
+            FROM products p
+            JOIN categories c ON p.category_id = c.id
+            WHERE (c.id = %s OR c.parent_id = %s) AND p.is_available = TRUE 
+            ORDER BY c.name, p.name
+        ''', (category_id, category_id))
+        products = cursor.fetchall()
+        conn.close()
+
+        if not products:
+            text = f"😔 У категорії \"{category_info['emoji']} {category_info['name']}\" поки що немає товарів"
+            keyboard = [
+                [InlineKeyboardButton("🔙 До категорії", callback_data=f"category_{category_id}")],
+                [InlineKeyboardButton("🏠 На головну", callback_data="start")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
             return
 
-        # Это подкатегория с товарами - показываем меню с пошаговым просмотром и "Весь асортимент"
-        text = f"📂 <b>{category_info['emoji']} {category_info['name']}</b>\n\nЗнайдено {product_count} товарів."
+        # Удаляем исходное сообщение
+        await query.delete_message()
 
-        keyboard = [
-            [InlineKeyboardButton(f"🛍️ Весь асортимент ({product_count})",
-                                  callback_data=f"all_in_category_{category_id}")]
-        ]
+        # Отправляем заголовок
+        header_text = f"🛍️ <b>Весь асортимент: {category_info['emoji']} {category_info['name']}</b>\n\nЗнайдено {len(products)} товарів:"
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=header_text,
+            parse_mode='HTML'
+        )
 
-        # Если это подкатегория, добавляем возврат к родительской категории
-        if category_info['parent_id']:
-            keyboard.append([InlineKeyboardButton("🔙 До  категорій",
-                                                  callback_data=f"category_{category_info['parent_id']}")])
+        # Отправляем каждый товар
+        for row in products:
+            prod_id = row['id']
+            name = row['name']
+            price = row['price']
+            description = row['description']
+            photos_json = row['photos']
+            cat_name = row['cat_name']
+            cat_emoji = row['cat_emoji']
 
-        keyboard.append([InlineKeyboardButton("🏠 На головну", callback_data="start")])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        try:
-            await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
-        except Exception:
             try:
-                await query.delete_message()
-            except Exception:
-                pass
+                photos = json.loads(photos_json) if photos_json else []
+            except:
+                photos = []
 
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=text,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
+            product_text = f"""🛍️ <b>{name}</b>
+
+    💰 <b>Ціна:</b> {price:.2f} грн
+    📂 <b>Категорія:</b> {cat_emoji} {cat_name}
+
+    📝 <b>Опис:</b>
+    {description or 'Опис відсутній'}"""
+
+            keyboard = [
+                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            # Отправляем с фото или без
+            if photos:
+                if len(photos) == 1:
+                    # Одно фото
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=photos[0],
+                        caption=product_text,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                else:
+                    # Несколько фото - медиагруппа
+                    try:
+                        media = []
+                        for i, photo in enumerate(photos):
+                            if i == 0:
+                                # Первое фото с полным описанием
+                                media.append(InputMediaPhoto(media=photo, caption=product_text, parse_mode='HTML'))
+                            else:
+                                # Остальные фото без подписи
+                                media.append(InputMediaPhoto(media=photo))
+
+                        # Отправляем медиагруппу
+                        await context.bot.send_media_group(
+                            chat_id=update.effective_chat.id,
+                            media=media
+                        )
+
+                        # Отправляем кнопки отдельным сообщением
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="👆 Всі фотографії товару",
+                            reply_markup=reply_markup
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending media group for product {prod_id}: {e}")
+                        # Fallback - отправляем как обычное фото
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=photos[0],
+                            caption=product_text,
+                            parse_mode='HTML',
+                            reply_markup=reply_markup
+                        )
+            else:
+                # Без фото
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=product_text,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+
+        # Отправляем кнопки навигации в конце
+        final_keyboard = [
+            [InlineKeyboardButton("🏠 На головну", callback_data="start")]
+        ]
+        final_reply_markup = InlineKeyboardMarkup(final_keyboard)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="👆 Всі товари показані вище",
+            reply_markup=final_reply_markup
+        )
 
 
     async def show_all_products_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
