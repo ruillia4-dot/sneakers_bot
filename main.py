@@ -1,6 +1,7 @@
 import logging
 import os
 from urllib.parse import urlparse
+import psycopg2.errors
 
 import psycopg2
 from dotenv import load_dotenv
@@ -82,8 +83,6 @@ class ShopBot:
         conn = psycopg2.connect(**self.db_config)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-
-
         # Таблиця категорій з підтримкою підкатегорій
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS categories (
@@ -134,6 +133,15 @@ class ShopBot:
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # МИГРАЦИЯ: Добавляем колонку source_link если её нет
+        try:
+            cursor.execute("ALTER TABLE products ADD COLUMN source_link TEXT")
+            print("Колонка source_link добавлена")
+        except psycopg2.errors.DuplicateColumn:
+            print("Колонка source_link уже существует")
+        except Exception as e:
+            print(f"Ошибка при добавлении колонки source_link: {e}")
 
         conn.commit()
         conn.close()
