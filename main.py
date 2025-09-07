@@ -1046,7 +1046,7 @@ class ShopBot:
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="👆",
+            text=" ",
             reply_markup=final_reply_markup
         )
 
@@ -1156,7 +1156,7 @@ class ShopBot:
                         # Отправляем кнопки отдельным сообщением
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
-                            text="👆",
+                            text=" ",
                             reply_markup=reply_markup
                         )
                     except Exception as e:
@@ -1186,7 +1186,7 @@ class ShopBot:
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="👆",
+            text=" ",
             reply_markup=final_reply_markup
         )
 
