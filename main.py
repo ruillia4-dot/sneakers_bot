@@ -494,11 +494,6 @@ class ShopBot:
             admin_message += f"🔗 <b>Лінк:</b> {preorder_data['link']}\n"
 
         admin_message += f"""
-    <b>Контактна інформація:</b>
-    - Телефон: {self.contact_info['phone']}
-    - Email: {self.contact_info['email']}
-    - Telegram: {self.contact_info['telegram']}
-    - Instagram: {self.contact_info['instagram']}
         """
 
         # Отправляем админам
