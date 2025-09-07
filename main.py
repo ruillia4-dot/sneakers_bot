@@ -41,7 +41,12 @@ class ShopBot:
     def __init__(self, token: str):
         self.token = token
         self.admin_ids = []
+
+        # Отладочный вывод
         database_url = os.getenv('DATABASE_URL')
+        print(f"DATABASE_URL найден: {database_url is not None}")
+        print(f"DATABASE_URL: {database_url}")
+
         if database_url:
             url = urlparse(database_url)
             self.db_config = {
@@ -51,6 +56,7 @@ class ShopBot:
                 'password': url.password,
                 'port': url.port
             }
+            print(f"Используется Railway БД: {url.hostname}")
         else:
             self.db_config = {
                 'host': os.getenv('DB_HOST', 'localhost'),
@@ -59,6 +65,9 @@ class ShopBot:
                 'password': os.getenv('DB_PASSWORD', 'shop_bot'),
                 'port': int(os.getenv('DB_PORT', 5432))
             }
+            print("Используется localhost БД")
+
+        print(f"Конфигурация БД: {self.db_config}")
 
         self.contact_info = {
             'phone': '+38 050 908 58 75',
