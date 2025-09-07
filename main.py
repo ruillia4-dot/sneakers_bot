@@ -494,7 +494,7 @@ class ShopBot:
             admin_message += f"🔗 <b>Лінк:</b> {preorder_data['link']}\n"
 
         admin_message += f"""
-   
+
         """
 
         # Отправляем админам
@@ -1046,6 +1046,7 @@ class ShopBot:
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
+            text="👆",
             reply_markup=final_reply_markup
         )
 
@@ -1155,6 +1156,7 @@ class ShopBot:
                         # Отправляем кнопки отдельным сообщением
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
+                            text="👆",
                             reply_markup=reply_markup
                         )
                     except Exception as e:
@@ -1184,6 +1186,7 @@ class ShopBot:
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
+            text="👆",
             reply_markup=final_reply_markup
         )
 
