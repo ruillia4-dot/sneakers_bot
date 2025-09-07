@@ -1026,12 +1026,19 @@ class ShopBot:
                             media=media
                         )
 
-                        # Отправляем кнопки отдельным сообщением после медиагруппы
-                        await context.bot.send_message(
-                            chat_id=update.effective_chat.id,
-                            text=" ",  # Минимальный невидимый текст
-                            reply_markup=reply_markup
-                        )
+                        # Отправляем кнопки отдельным сообщением после медиагруппы ТОЛЬКО если есть кнопки
+                        if len(keyboard) > 1:  # Если больше одной кнопки (есть навигация)
+                            await context.bot.send_message(
+                                chat_id=update.effective_chat.id,
+                                text=" ",  # Минимальный невидимый текст
+                                reply_markup=reply_markup
+                            )
+                        else:  # Если только кнопка связи - отправляем отдельно
+                            await context.bot.send_message(
+                                chat_id=update.effective_chat.id,
+                                text=" ",
+                                reply_markup=reply_markup
+                            )
 
                     except Exception as e:
                         logger.error(f"Error sending media group for product {prod_id}: {e}")
