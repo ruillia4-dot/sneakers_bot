@@ -38,6 +38,8 @@ EDIT_PRODUCT_PHOTOS, EDIT_PRODUCT_CATEGORY = range(25, 27)
 
 ADMIN_USERS_MENU, ADD_ADMIN_ID, DELETE_ADMIN_SELECT = range(27, 30)
 
+CART_CONTACT_MESSAGE = 30
+
 class ShopBot:
     def __init__(self, token: str):
         self.token = token
@@ -72,7 +74,7 @@ class ShopBot:
 
         self.contact_info = {
             'phone': '+38 050 908 58 75',
-            'instagram': '@sneakerhead.store13',
+            'instagram': 'https://www.instagram.com/sneakerhead.store13?igsh=MTUzNnMzYmh6a3Npbw==',
             'email': 'ruillia4@gmail.com',
             'telegram': '@IR_Sneakerhead'
         }
@@ -146,6 +148,48 @@ class ShopBot:
         conn.commit()
         conn.close()
         self.load_admins()
+
+
+    def get_cart_items(self, user_id: int):
+        """Отримати товари з корзини користувача"""
+        cart_key = f"cart_{user_id}"
+        # Використовуємо user_data для зберігання корзини в пам'яті
+        return getattr(self, cart_key, {})
+
+    def add_to_cart(self, user_id: int, product_id: int):
+        """Додати товар до корзини"""
+        cart_key = f"cart_{user_id}"
+        cart = getattr(self, cart_key, {})
+
+        if str(product_id) in cart:
+            cart[str(product_id)] += 1
+        else:
+            cart[str(product_id)] = 1
+
+        setattr(self, cart_key, cart)
+        return cart[str(product_id)]
+
+    def remove_from_cart(self, user_id: int, product_id: int):
+        """Видалити товар з корзини"""
+        cart_key = f"cart_{user_id}"
+        cart = getattr(self, cart_key, {})
+
+        if str(product_id) in cart:
+            if cart[str(product_id)] > 1:
+                cart[str(product_id)] -= 1
+            else:
+                del cart[str(product_id)]
+            setattr(self, cart_key, cart)
+
+    def clear_cart(self, user_id: int):
+        """Очистити корзину"""
+        cart_key = f"cart_{user_id}"
+        setattr(self, cart_key, {})
+
+    def get_cart_count(self, user_id: int):
+        """Отримати кількість товарів у корзині"""
+        cart = self.get_cart_items(user_id)
+        return sum(cart.values())
 
     def load_admins(self):
         """Загружение списка админов из БД"""
@@ -253,44 +297,439 @@ class ShopBot:
         user = update.effective_user
 
         welcome_text = f"""
-    🛍️ <b>Ласкаво просимо до нашого магазину!</b>
+    🛏️ <b>Ласкаво просимо до нашого магазину!</b>
 
     Привіт, {user.first_name}! 👋
 
     Тут ви можете:
-    🔍 Переглядати наш асортимент
+    📓 Переглядати наш асортимент
     📱 Фільтрувати товари за категоріями
     💰 Дізнаватися актуальні ціни
     📸 Переглядати фотографії товарів
     📞 Зв'язатися з нами щодо товарів
 
-    <i>Натисніть кнопку нижче, щоб почати покупки!</i>
+    <i>Використовуйте кнопки нижче для навігації!</i>
         """
 
-        keyboard = [
-            [InlineKeyboardButton("🛒 Переглянути товари", callback_data="show_categories")],
-            [InlineKeyboardButton("🎯 Передзамовлення", callback_data="preorder")],
-            [InlineKeyboardButton("ℹ️ Про магазин", callback_data="about")]
+        user_id = user.id
+        cart_count = self.get_cart_count(user_id)
+        cart_text = f"🛒 Корзина ({cart_count})" if cart_count > 0 else "🛒 Корзина"
+
+        # Inline клавіатура для швидкого доступу
+        inline_keyboard = [
+            [InlineKeyboardButton("🛒Переглянути товари", callback_data="show_categories")],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        inline_reply_markup = InlineKeyboardMarkup(inline_keyboard)
+
+        # Основна клавіатура (постійна)
+        main_keyboard = self.get_main_keyboard(user_id, force_show=True)
 
         if update.message:
-            await update.message.reply_text(welcome_text, parse_mode='HTML', reply_markup=reply_markup)
+            await update.message.reply_text(
+                welcome_text,
+                parse_mode='HTML',
+                reply_markup=main_keyboard  # Показуємо основну клавіатуру
+            )
+
+            #Додатково відправляємо inline кнопки для швидкого доступу
+            await update.message.reply_text(
+                "🚀 <b>Швидкий доступ:</b>",
+                parse_mode='HTML',
+                reply_markup=inline_reply_markup
+            )
         else:
-            # Якщо це callback query, спочатку видаляємо попереднє повідомлення та надсилаємо нове
             try:
-                await update.callback_query.edit_message_text(welcome_text, parse_mode='HTML',
-                                                              reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(
+                    welcome_text,
+                    parse_mode='HTML',
+                    reply_markup=inline_reply_markup
+                )
+                # При callback query також показуємо основну клавіатуру
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Основне меню активовано 👇",
+                    reply_markup=main_keyboard
+                )
             except Exception:
-                # Якщо не вдається відредагувати (наприклад, повідомлення містить фото),
-                # видаляємо його та надсилаємо нове
                 await update.callback_query.delete_message()
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=welcome_text,
                     parse_mode='HTML',
-                    reply_markup=reply_markup
+                    reply_markup=main_keyboard
                 )
+                # await context.bot.send_message(
+                #     chat_id=update.effective_chat.id,
+                #     text="🚀 <b>Швидкий доступ:</b>",
+                #     parse_mode='HTML',
+                #     reply_markup=inline_reply_markup
+                # )
+
+    def get_main_keyboard(self, user_id: int, force_show: bool = False):
+        """Створити основну клавіатуру"""
+        cart_count = self.get_cart_count(user_id)
+        cart_text = f"🛒 Корзина ({cart_count})" if cart_count > 0 else "🛒 Корзина"
+
+        keyboard = [
+            [KeyboardButton("🏠 Головна"),],
+            [KeyboardButton(cart_text), KeyboardButton("🎯 Передзамовлення",)],
+            [KeyboardButton("ℹ️ Про магазин")]
+        ]
+
+        # Додаємо кнопки адміна якщо користувач є адміном
+        if self.is_admin(user_id):
+            keyboard.extend([
+                [KeyboardButton("⚙️ Адмін панель"), KeyboardButton("💬 Повідомлення")],
+                [KeyboardButton("📊 Статистика")]
+            ])
+
+        # Для постійної клавіатури використовуємо правильні параметри
+        return ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True,
+            one_time_keyboard=False,  # False для постійної клавіатури
+            selective=False  # Показувати всім користувачам в чаті
+        )
+
+    async def handle_keyboard_buttons(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обробка кнопок клавіатури"""
+        text = update.message.text.strip()
+        user_id = update.effective_user.id
+
+        # ВАЖЛИВО: Перевіряємо, чи не активний ConversationHandler
+        # Якщо є активна розмова, не обробляємо як кнопку клавіатури
+        if context.user_data.get('conversation_state') is not None:
+            print(f"[DEBUG] Активна розмова, пропускаємо обробку клавіатури для: '{text}'")
+            return  # Дозволяємо ConversationHandler обробити повідомлення
+
+        print(f"[DEBUG] Отримано текст: '{text}' від користувача {user_id}")
+
+        # Перевіряємо, чи це кнопка з клавіатури
+        keyboard_buttons = [
+            "🏠 Головна", "📂 Категорії", "🎯 Передзамовлення",
+            "ℹ️ Про магазин", "⚙️ Адмін панель", "💬 Повідомлення", "📊 Статистика"
+        ]
+
+        # Якщо текст не є кнопкою клавіатури, не обробляємо
+        if not (text in keyboard_buttons or text.startswith("🛒 Корзина")):
+            print(f"[DEBUG] Текст '{text}' не є кнопкою клавіатури")
+            return
+
+        try:
+            if text == "🏠 Головна":
+                print("[DEBUG] Викликаю метод start")
+                await self.start(update, context)
+
+            elif text.startswith("🛒 Корзина"):
+                print("[DEBUG] Показую корзину")
+                await self.view_cart_keyboard(update, context)
+
+            elif text == "🎯 Передзамовлення":
+                print("[DEBUG] Показую передзамовлення")
+                await self.preorder_keyboard(update, context)
+
+            elif text == "ℹ️ Про магазин":
+                print("[DEBUG] Показую інформацію про магазин")
+                await self.about_keyboard(update, context)
+
+            elif text == "⚙️ Адмін панель" and self.is_admin(user_id):
+                print("[DEBUG] Викликаю адмін панель")
+                await self.admin_panel(update, context)
+
+            elif text == "💬 Повідомлення" and self.is_admin(user_id):
+                print("[DEBUG] Показую повідомлення")
+                await self.admin_messages_keyboard(update, context)
+
+            elif text == "📊 Статистика" and self.is_admin(user_id):
+                print("[DEBUG] Показую статистику")
+                await self.admin_stats_keyboard(update, context)
+
+            else:
+                print(f"[DEBUG] Невідома команда: '{text}'")
+
+        except Exception as e:
+            print(f"[ERROR] Помилка в handle_keyboard_buttons: {e}")
+            import traceback
+            traceback.print_exc()
+            await update.message.reply_text("Виникла помилка. Спробуйте ще раз.")
+
+    # Спрощені методи для клавіатури
+    async def show_categories_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показати категорії (з клавіатури)"""
+        categories = self.db.get_categories()
+        if not categories:
+            await update.message.reply_text("📂 Категорії ще не додані")
+            return
+
+        text = "📂 <b>Категорії товарів:</b>\n\n"
+        keyboard = []
+
+        for category in categories:
+            text += f"• {category['name']}\n"
+            keyboard.append([InlineKeyboardButton(
+                f"📂 {category['name']}",
+                callback_data=f"category_{category['id']}"
+            )])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="start")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def view_cart_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показати корзину (з клавіатури)"""
+        user_id = update.effective_user.id
+        cart_data = self.get_cart_items(user_id)  # Словник {product_id: quantity}
+
+        print(f"[DEBUG] cart_data: {cart_data}")
+
+        if not cart_data:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="start")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "🛒 Ваша корзина порожня",
+                reply_markup=reply_markup
+            )
+            return
+
+        text = "🛒 <b>Ваша корзина:</b>\n\n"
+        total = 0
+        keyboard = []
+
+        # З'єднання з базою даних
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        try:
+            # Ітеруємо по словнику {product_id: quantity}
+            for product_id, quantity in cart_data.items():
+                print(f"[DEBUG] Processing product_id: {product_id}, quantity: {quantity}")
+
+                try:
+                    # Отримуємо інформацію про товар з БД
+                    cursor.execute("""
+                        SELECT id, name, description, price, photos, category_id, is_available 
+                        FROM products 
+                        WHERE id = %s
+                    """, (int(product_id),))
+
+                    product = cursor.fetchone()
+                    if not product:
+                        print(f"[DEBUG] Product {product_id} not found in DB")
+                        continue
+
+                    name = product['name']
+                    price = product['price']
+
+                    item_total = price * quantity
+                    total += item_total
+
+                    text += f"• {name}\n"
+                    text += f"  Ціна: {price}₪ × {quantity} = {item_total}₪\n\n"
+
+                    keyboard.append([
+                        InlineKeyboardButton("➖", callback_data=f"cart_remove_{product_id}"),
+                        InlineKeyboardButton(f"{name} ({quantity})", callback_data="ignore"),
+                        InlineKeyboardButton("➕", callback_data=f"cart_add_{product_id}")
+                    ])
+
+                except Exception as e:
+                    print(f"[DEBUG] Error processing cart item {product_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+        finally:
+            cursor.close()
+            conn.close()
+
+        if total == 0:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="start")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "🛒 Ваша корзина порожня",
+                reply_markup=reply_markup
+            )
+            return
+
+        text += f"<b>Загальна сума: {total}₪</b>"
+
+        keyboard.extend([
+            [InlineKeyboardButton("🗑️ Очистити корзину", callback_data="cart_clear")],
+            [InlineKeyboardButton("📞 Оформити замовлення", callback_data="cart_checkout")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="start")]
+        ])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def about_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Інформація про магазин (з клавіатури)"""
+        about_text = f"""
+    ℹ️ <b>Про наш магазин</b>
+
+👕 Ми спеціалізуємось на продажу оригінального одягу та взуття з Європи та США.
+У нас можна придбати товари в наявності та під замовлення.
+
+
+📞 <b>Контакти:</b>
+<b>Контактна інформація:</b>
+* Телефон: {self.contact_info['phone']}
+* Email: {self.contact_info['email']}
+* Telegram: {self.contact_info['telegram']}
+* Instagram: {self.contact_info['instagram']}
+
+📦 <b>Доставка:</b>
+• 🚚 Нова Пошта по всій Україні — 7–14 днів (термін залежить від міста та роботи митниці).
+• 🚖 По м. Ужгород — швидка доставка / самовивіз.
+
+
+💳 <b>Оплата:</b>
+• Повна оплата на карту 💳
+• Накладений платіж (оплата при отриманні) 💵
+• 
+
+<i>💙💛 Дякуємо, що обираєте Sneakerhead Store!</i>
+        """
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="start")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(about_text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def preorder_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Передзамовлення (з клавіатури)"""
+        preorder_text = """
+    🎯 <b>Передзамовлення</b>
+
+    Не знайшли потрібний товар? Ми можемо його замовити спеціально для вас!
+
+    Просто надішліть нам:
+    📝 Опис товару
+    📸 Фотографію (за бажанням)
+    🔗 Посилання на товар (за бажанням)
+    👟 Модель та розмір
+
+    Ми зв'яжемося з вами найближчим часом!
+        """
+
+        keyboard = [
+            [InlineKeyboardButton("📝 Створити передзамовлення", callback_data="preorder")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(preorder_text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def admin_messages_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('''
+            SELECT id, user_id, username, full_name, message_type, message_text, product_name, created_at, is_read
+            FROM user_messages 
+            ORDER BY created_at DESC 
+            LIMIT 10
+        ''')
+        messages = cursor.fetchall()
+
+        # Подсчитываем непрочитанные
+        cursor.execute('SELECT COUNT(*) FROM user_messages WHERE is_read = FALSE')
+        cursor.execute('SELECT COUNT(*) as count FROM user_messages WHERE is_read = FALSE')
+        unread_count = cursor.fetchone()['count']
+        conn.close()
+
+        if not messages:
+            text = "📭 <b>Немає повідомлень</b>"
+        else:
+            text = f"💬 <b>Повідомлення користувачів</b>\n\n"
+            text += f"Непрочитаних: {unread_count}\n\n"
+
+            for row in messages:
+                msg_id = row['id']
+                user_id = row['user_id']
+                username = row['username']
+                full_name = row['full_name']
+                msg_type = row['message_type']
+                msg_text = row['message_text']
+                product_name = row['product_name']
+                created_at = row['created_at']
+                is_read = row['is_read']
+                status = "📩" if not is_read else "📨"
+                type_icon = "🛒" if msg_type == "contact_seller" else "🎯"
+
+                text += f"{status} {type_icon} <b>{full_name}</b>\n"
+                text += f"@{username or 'без username'}\n"
+
+                if product_name:
+                    text += f"Товар: {product_name}\n"
+
+                # Увеличиваем лимит символов для сообщения
+                if len(msg_text) > 100:
+                    text += f"Текст: {msg_text[:100]}...\n"
+                else:
+                    text += f"Текст: {msg_text}\n"
+
+                text += f"Дата: {created_at}\n"
+                text += f"ID: {msg_id}\n\n"
+
+        keyboard = [
+            [InlineKeyboardButton("📋 Всі повідомлення", callback_data="all_messages")],
+            [InlineKeyboardButton("✅ Позначити всі прочитаними", callback_data="mark_all_read")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def admin_stats_keyboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Статистика адміна (з клавіатури)"""
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        try:
+            # Загальна кількість товарів
+            cursor.execute('SELECT COUNT(*) as count FROM products WHERE is_available = TRUE')
+            products_count = cursor.fetchone()['count']
+
+            # Загальна кількість категорій
+            cursor.execute('SELECT COUNT(*) as count FROM categories')
+            categories_count = cursor.fetchone()['count']
+
+            # Кількість повідомлень
+            cursor.execute('SELECT COUNT(*) as count FROM user_messages')
+            messages_count = cursor.fetchone()['count']
+
+            # Непрочитані повідомлення
+            cursor.execute('SELECT COUNT(*) as count FROM user_messages WHERE is_read = FALSE')
+            unread_messages = cursor.fetchone()['count']
+
+            text = f"""
+    📊 <b>Статистика магазину</b>
+
+    🛍️ <b>Товари:</b> {products_count}
+    📂 <b>Категорії:</b> {categories_count}
+    💬 <b>Всього повідомлень:</b> {messages_count}
+    📩 <b>Непрочитаних:</b> {unread_messages}
+
+    📈 <b>Останні дії:</b>
+    • Система працює стабільно
+    • База даних підключена
+            """
+
+        except Exception as e:
+            text = f"❌ Помилка отримання статистики: {e}"
+
+        finally:
+            cursor.close()
+            conn.close()
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(text.strip(), parse_mode='HTML', reply_markup=reply_markup)
 
     async def preorder_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Начало процесса предзаказа"""
@@ -983,8 +1422,10 @@ class ShopBot:
     📝 <b>Опис:</b>
     {description or 'Опис відсутній'}"""
 
+
             keyboard = [
-                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
+                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}"),
+                InlineKeyboardButton("🛒 До корзини", callback_data=f"add_to_cart_{prod_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1044,11 +1485,11 @@ class ShopBot:
         ]
         final_reply_markup = InlineKeyboardMarkup(final_keyboard)
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="-> 🔗🔗",
-            reply_markup=final_reply_markup
-        )
+        # await context.bot.send_message(
+        #     chat_id=update.effective_chat.id,
+        #     text="-> 🔗🔗",
+        #     reply_markup=final_reply_markup
+        # )
 
     async def show_all_products_in_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показ всех товаров в категории как отдельные посты со всеми фото"""
@@ -1120,8 +1561,10 @@ class ShopBot:
     {description or 'Опис відсутній'}"""
 
             keyboard = [
-                [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{prod_id}")]
+                [InlineKeyboardButton("📞 Зв'язатися", callback_data=f"contact_seller_{prod_id}"),
+                 InlineKeyboardButton("🛒 До корзини", callback_data=f"add_to_cart_{prod_id}")]
             ]
+
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             # Отправляем с фото или без
@@ -1154,11 +1597,11 @@ class ShopBot:
                         )
 
                         # Отправляем кнопки отдельным сообщением
-                        await context.bot.send_message(
-                            chat_id=update.effective_chat.id,
-                            text="-> 🔗🔗",
-                            reply_markup=reply_markup
-                        )
+                        # await context.bot.send_message(
+                        #     chat_id=update.effective_chat.id,
+                        #     text="-> 🔗🔗",
+                        #     reply_markup=reply_markup
+                        # )
                     except Exception as e:
                         logger.error(f"Error sending media group for product {prod_id}: {e}")
                         # Fallback - отправляем как обычное фото
@@ -1184,11 +1627,11 @@ class ShopBot:
         ]
         final_reply_markup = InlineKeyboardMarkup(final_keyboard)
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="-> 🔗🔗",
-            reply_markup=final_reply_markup
-        )
+        # await context.bot.send_message(
+        #     chat_id=update.effective_chat.id,
+        #     text="-> 🔗🔗",
+        #     reply_markup=final_reply_markup
+        # )
 
 
     async def show_all_products_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1294,8 +1737,10 @@ class ShopBot:
         keyboard = []
 
         # Кнопка зв'язку з продавцем
-        keyboard.append(
-            [InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{product_id}")])
+        keyboard.append([
+            InlineKeyboardButton("📞 Зв'язатися щодо товару", callback_data=f"contact_seller_{product_id}"),
+            InlineKeyboardButton("🛒 До корзини", callback_data=f"add_to_cart_{product_id}")
+        ])
 
         # Навігація між товарами
         nav_buttons = []
@@ -1392,6 +1837,309 @@ class ShopBot:
             else:
                 await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
 
+
+    async def add_to_cart_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Додати товар до корзини"""
+        query = update.callback_query
+        await query.answer()
+
+        product_id = int(query.data.split('_')[3])
+        user_id = update.effective_user.id
+
+        count = self.add_to_cart(user_id, product_id)
+
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute('SELECT name FROM products WHERE id = %s', (product_id,))
+        product = cursor.fetchone()
+        conn.close()
+
+        # Оновлюємо клавіатуру з новою кількістю товарів у корзині
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"✅ {product['name']} додано до корзини ({count} шт.)",
+
+        )
+
+
+    async def view_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Переглянути корзину"""
+        query = update.callback_query
+        await query.answer()
+
+        user_id = update.effective_user.id
+        cart = self.get_cart_items(user_id)
+
+        if not cart:
+            text = "🛒 <b>Ваша корзина порожня</b>\n\nДодайте товари для оформлення замовлення"
+            keyboard = [[InlineKeyboardButton("🛍️ До товарів", callback_data="show_categories")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
+            return
+
+        # Отримуємо інформацію про товари
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        placeholders = ','.join(['%s'] * len(cart))
+        cursor.execute(f'''
+            SELECT id, name, price FROM products 
+            WHERE id IN ({placeholders}) AND is_available = TRUE
+        ''', list(map(int, cart.keys())))
+
+        products = cursor.fetchall()
+        conn.close()
+
+        text = "🛒 <b>Ваша корзина</b>\n\n"
+        total_price = 0
+
+        keyboard = []
+
+        for product in products:
+            prod_id = str(product['id'])
+            quantity = cart[prod_id]
+            item_total = product['price'] * quantity
+            total_price += item_total
+
+            text += f"📦 <b>{product['name']}</b>\n"
+            text += f"💰 {product['price']:.2f} грн × {quantity} = {item_total:.2f} грн\n"
+
+            # Кнопки + і - для кожного товару
+            keyboard.append([
+                InlineKeyboardButton("➖", callback_data=f"cart_remove_{product['id']}"),
+                InlineKeyboardButton(f"{quantity} шт.", callback_data="ignore"),
+                InlineKeyboardButton("➕", callback_data=f"cart_add_{product['id']}")
+            ])
+
+        text += f"\n💳 <b>Загальна сума: {total_price:.2f} грн</b>"
+
+        # Основні кнопки
+        keyboard.extend([
+            [InlineKeyboardButton("📞 Оформити замовлення", callback_data="cart_checkout")],
+            [InlineKeyboardButton("🗑️ Очистити корзину", callback_data="cart_clear")],
+            [InlineKeyboardButton("🛍️ Продовжити покупки", callback_data="show_categories")]
+        ])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
+
+    async def cart_add_item(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Збільшити кількість товару в корзині"""
+        query = update.callback_query
+        await query.answer()
+
+        product_id = int(query.data.split('_')[2])
+        user_id = update.effective_user.id
+
+        self.add_to_cart(user_id, product_id)
+
+        # Оновлюємо клавіатуру
+        updated_keyboard = self.get_main_keyboard(user_id)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🔄",
+            reply_markup=updated_keyboard
+        )
+
+        await self.view_cart(update, context)
+
+    async def cart_remove_item(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Зменшити кількість товару в корзині"""
+        query = update.callback_query
+        await query.answer()
+
+        product_id = int(query.data.split('_')[2])
+        user_id = update.effective_user.id
+
+        self.remove_from_cart(user_id, product_id)
+
+        # Оновлюємо клавіатуру
+        updated_keyboard = self.get_main_keyboard(user_id)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🔄",
+            reply_markup=updated_keyboard
+        )
+
+        await self.view_cart(update, context)
+
+    async def cart_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Очистити корзину"""
+        query = update.callback_query
+        await query.answer()
+
+        user_id = update.effective_user.id
+        self.clear_cart(user_id)
+
+        # Оновлюємо клавіатуру
+        updated_keyboard = self.get_main_keyboard(user_id)
+
+        await query.edit_message_text(
+            "✅ <b>Корзину очищено</b>",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🛍️ До товарів", callback_data="show_categories")
+            ]])
+        )
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Корзину очищено",
+            reply_markup=updated_keyboard
+        )
+
+    async def cart_checkout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Початок оформлення замовлення з корзини"""
+        query = update.callback_query
+        await query.answer()
+
+        user_id = update.effective_user.id
+        cart = self.get_cart_items(user_id)
+
+        if not cart:
+            await query.answer("Корзина порожня", show_alert=True)
+            return ConversationHandler.END
+
+        context.user_data['cart_checkout'] = True
+
+        text = """
+    📞 <b>Оформлення замовлення</b>
+
+    Напишіть ваше повідомлення або питання щодо замовлення:
+    - Ваше ім'я та контакти
+    - Спосіб доставки  
+    - Додаткові побажання
+
+    Або просто напишіть "Замовлення" для стандартного оформлення.
+        """
+
+        keyboard = [[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cart_contact")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
+        return CART_CONTACT_MESSAGE
+
+    async def process_cart_contact_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обробка повідомлення для замовлення з корзини"""
+        user_message = update.message.text
+        user = update.effective_user
+        user_id = user.id
+
+        cart = self.get_cart_items(user_id)
+
+        if not cart:
+            await update.message.reply_text("❌ Корзина порожня")
+            return ConversationHandler.END
+
+        # Отримуємо інформацію про товари
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        placeholders = ','.join(['%s'] * len(cart))
+        cursor.execute(f'''
+            SELECT id, name, price, source_link FROM products 
+            WHERE id IN ({placeholders}) AND is_available = TRUE
+        ''', list(map(int, cart.keys())))
+
+        products = cursor.fetchall()
+
+        # Зберігаємо повідомлення в БД
+        cart_text = "ЗАМОВЛЕННЯ З КОРЗИНИ:\n"
+        total_price = 0
+
+        for product in products:
+            prod_id = str(product['id'])
+            quantity = cart[prod_id]
+            item_total = product['price'] * quantity
+            total_price += item_total
+
+            cart_text += f"• {product['name']} - {quantity} шт. × {product['price']:.2f} грн = {item_total:.2f} грн\n"
+
+        cart_text += f"\nЗАГАЛЬНА СУМА: {total_price:.2f} грн\n\n"
+        cart_text += f"ПОВІДОМЛЕННЯ КЛІЄНТА:\n{user_message}"
+
+        cursor.execute('''
+            INSERT INTO user_messages (user_id, username, full_name, message_type, message_text)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (user.id, user.username, user.full_name, 'cart_order', cart_text))
+
+        conn.commit()
+        conn.close()
+
+        # Формуємо повідомлення для адмінів
+        admin_message = f"""
+    🛒 <b>Нове замовлення з корзини</b>
+
+    👤 <b>Від:</b> {user.full_name} (@{user.username or 'немає username'})
+    🆔 <b>User ID:</b> {user.id}
+
+    📋 <b>ТОВАРИ В ЗАМОВЛЕННІ:</b>
+    """
+
+        for product in products:
+            prod_id = str(product['id'])
+            quantity = cart[prod_id]
+            item_total = product['price'] * quantity
+
+            admin_message += f"📦 <b>{product['name']}</b>\n"
+            admin_message += f"💰 {product['price']:.2f} грн × {quantity} шт. = {item_total:.2f} грн\n"
+            if product['source_link']:
+                admin_message += f"🔗 Джерело: {product['source_link']}\n"
+            admin_message += "\n"
+
+        admin_message += f"💳 <b>ЗАГАЛЬНА СУМА: {total_price:.2f} грн</b>\n\n"
+        admin_message += f"💬 <b>Повідомлення клієнта:</b>\n{user_message}\n\n"
+        admin_message += f"""<b>Контакти для зв'язку:</b>
+    - Телефон: {self.contact_info['phone']}
+    - Email: {self.contact_info['email']}
+    - Telegram: {self.contact_info['telegram']}
+    - Instagram: {self.contact_info['instagram']}"""
+
+        # Відправляємо адмінам
+        for admin_id in self.admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_message,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Error sending cart order to admin {admin_id}: {e}")
+
+        # Очищаємо корзину
+        self.clear_cart(user_id)
+
+        # Відповідь користувачу
+        response_text = f"""
+    ✅ <b>Ваше замовлення надіслано!</b>
+
+    📋 <b>Деталі замовлення:</b>
+    - Товарів: {len(products)}
+    - Загальна сума: {total_price:.2f} грн
+
+    Ми зв'яжемося з вами найближчим часом для уточнення деталей доставки.
+
+    <b>Контакти для прямого зв'язку:</b>
+    - Телефон: {self.contact_info['phone']}
+    - Email: {self.contact_info['email']}
+    - Telegram: {self.contact_info['telegram']}
+    - Instagram: {self.contact_info['instagram']}
+        """
+
+        keyboard = [[InlineKeyboardButton("🏠 На головну", callback_data="start")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(response_text, parse_mode='HTML', reply_markup=reply_markup)
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    async def cancel_cart_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Скасування оформлення замовлення"""
+        query = update.callback_query
+        await query.answer()
+
+        await self.view_cart(update, context)
+        return ConversationHandler.END
 
     async def contact_seller(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Початок процесу зв'язку з продавцем"""
@@ -1526,46 +2274,6 @@ class ShopBot:
 
 
 
-    async def about(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Інформація про магазин"""
-        query = update.callback_query
-        await query.answer()
-
-        text = f"""
-ℹ️ <b>Про наш магазин</b>
-
-👕 Ми спеціалізуємось на продажу оригінального одягу та взуття з Європи та США.
-У нас можна придбати товари в наявності та під замовлення.
-
-
-📞 <b>Контакти:</b>
-<b>Контактна інформація:</b>
-* Телефон: {self.contact_info['phone']}
-* Email: {self.contact_info['email']}
-* Telegram: {self.contact_info['telegram']}
-* Instagram: {self.contact_info['instagram']}
-
-📦 <b>Доставка:</b>
-• 🚚 Нова Пошта по всій Україні — 7–14 днів (термін залежить від міста та роботи митниці).
-• 🚖 По м. Ужгород — швидка доставка / самовивіз.
-
-
-💳 <b>Оплата:</b>
-• Повна оплата на карту 💳
-• Накладений платіж (оплата при отриманні) 💵
-• 
-
-<i>💙💛 Дякуємо, що обираєте Sneakerhead Store!</i>
-        """
-
-        keyboard = [
-            [InlineKeyboardButton("🛒 До товарів", callback_data="show_categories")],
-            [InlineKeyboardButton("🏠 На головну", callback_data="start")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(text, parse_mode='HTML', reply_markup=reply_markup)
-
     # ==================== АДМІН ПАНЕЛЬ ====================
 
     async def admin_panel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1652,37 +2360,6 @@ class ShopBot:
             parse_mode='HTML'
         )
         return ADD_CATEGORY
-
-    async def process_add_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обробка додавання категорії"""
-        text = update.message.text.strip()
-
-        if ' ' in text:
-            parts = text.split(' ')
-            emoji = parts[-1]
-            name = ' '.join(parts[:-1])
-        else:
-            name = text
-            emoji = '📦'
-
-        try:
-            conn = psycopg2.connect(**self.db_config)
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute('INSERT INTO categories (name, emoji) VALUES (%s, %s)', (name, emoji))
-            conn.commit()
-            conn.close()
-
-            await update.message.reply_text(
-                f"✅ <b>Категорію додано!</b>\n\n"
-                f"{emoji} {name}",
-                parse_mode='HTML'
-            )
-        except psycopg2.IntegrityError:
-            await update.message.reply_text("❌ Категорія з такою назвою вже існує!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Помилка: {str(e)}")
-
-        return ConversationHandler.END
 
     async def add_subcategory_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Початок додавання підкатегорії"""
@@ -3623,15 +4300,40 @@ class ShopBot:
         application.add_handler(CallbackQueryHandler(self.show_products_in_category, pattern="^category_"))
         application.add_handler(CallbackQueryHandler(self.show_products_in_category, pattern="^products_"))
         application.add_handler(CallbackQueryHandler(self.show_all_products_user, pattern="^show_all_products_user$"))
-        application.add_handler(CallbackQueryHandler(self.about, pattern="^about$"))
         application.add_handler(preorder_conv_handler)
         application.add_handler(CallbackQueryHandler(self.browse_one_by_one, pattern="^browse_one_"))
+        # Хендлери для корзини
+        application.add_handler(CallbackQueryHandler(self.view_cart, pattern="^view_cart$"))
+        application.add_handler(CallbackQueryHandler(self.add_to_cart_handler, pattern="^add_to_cart_"))
+        application.add_handler(CallbackQueryHandler(self.cart_add_item, pattern="^cart_add_"))
+        application.add_handler(CallbackQueryHandler(self.cart_remove_item, pattern="^cart_remove_"))
+        application.add_handler(CallbackQueryHandler(self.cart_clear, pattern="^cart_clear$"))
 
+        cart_checkout_conv_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(self.cart_checkout, pattern="^cart_checkout$")],
+            states={
+                CART_CONTACT_MESSAGE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_cart_contact_message),
+                    CallbackQueryHandler(self.cancel_cart_contact, pattern="^cancel_cart_contact$"),
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel_cart_contact),
+                CallbackQueryHandler(self.cancel_cart_contact, pattern="^cancel_cart_contact$"),
+            ],
+        )
+
+        application.add_handler(cart_checkout_conv_handler)
 
 
         # Хендлери для адміна
         application.add_handler(admin_conv_handler)
         application.add_handler(contact_conv_handler)
+
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            self.handle_keyboard_buttons
+        ))
 
         if os.getenv('RAILWAY_ENVIRONMENT') != 'production':
             print("🤖 Бот запущено локально")
